@@ -1,0 +1,64 @@
+$doctype 5
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <title>Refreshing - Yesod devel
+    <style>
+      body {
+      background: #e6e6e6;
+      color: #444;
+      text-shadow: 1px 1px 1px #ffffff;
+      font-size: 30px;
+      font-family: georgia, serif;
+      }
+      .wrap {
+      margin: auto;
+      width: 25em;
+      }
+      h1 {
+      margin-bottom: 0;
+      }
+      h2 {
+      margin-top: 0;
+      font-size: 1em;
+      font-style: italic;
+      color: #546369;
+      }
+      header {
+      margin-top: 1em;
+      padding-bottom: 0.25em;
+      border-bottom: 1px solid #ccc;
+      color: #1a6e8e;
+      }
+      footer {
+      margin-top: 3em;
+      padding-top: 0.25em;
+      border-top: 1px solid #ccc;
+      color: #666;
+      font-size: 0.8em;
+      }
+      .msgs {
+      font-size: 0.9em;
+      }
+      .msgs p {
+      margin-bottom: 0.5em;
+      }
+      .msgs ul {
+      margin-top: 0;
+      line-height: 1.7em;
+      }
+      .msgs li {
+      padding-left: 0.5em;
+      }
+  <body>
+    <script>
+      var ws = new WebSocket("ws://localhost:4001/");
+      ws.onmessage = function (m) {
+          log(m.data, "");
+      }
+
+    <div class="wrap">
+      <header>
+        <small>Yesod Devel
+      <h1>The application isn’t built
+      <h2>We’ll keep trying to refresh every second

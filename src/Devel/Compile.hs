@@ -36,15 +36,26 @@ import System.Directory (createDirectoryIfMissing)
 import Devel.Paths
 import Devel.Types
 
--- reverse proxying
-import Network.HTTP.ReverseProxy
-import Network.Wai (Application, responseBuilder, responseLBS)
-import Network.HTTP.ReverseProxy (WaiProxyResponse(WPRProxyDest, WPRResponse), ProxyDest(ProxyDest), waiProxyTo)
-import Network.HTTP.Client (newManager, defaultManagerSettings)
-import Network.HTTP.Types (status200)
-import Text.Hamlet (shamletFile)
+-- web sockets
+import qualified Devel.WebSocket as DW
+import Control.Concurrent (forkIO)
+import qualified Network.WebSockets as WS
+import qualified Data.ByteString.Char8 as BS
+import Network.Socket (accept, withSocketsDo, close, Socket)
+import Devel.ReverseProxy (createSocket, checkPort)
+import Data.IORef
+import Control.Concurrent (threadDelay)
 import Text.Blaze.Html.Renderer.Utf8 (renderHtmlBuilder)
-
+import Text.Hamlet (shamletFile)
+import Network.HTTP.Types (status200)
+import Network.Wai (responseLBS)
+import Network.Wai.Handler.Warp (run)
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Builder as Builder
+import qualified Data.ByteString.Lazy.Char8 as Char8
+import Text.Blaze.Html.Renderer.Text (renderHtml)
+import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Lazy (toStrict)
 
 compile :: FilePath -> SessionConfig -> IO (Either [SourceError'] IdeSession)
 compile buildFile config = do
@@ -57,15 +68,22 @@ compile buildFile config = do
   let dumpDir = ".dist/dump-hi"
   _ <- createDirectoryIfMissing True dumpDir
 
-
   -- Description of session updates.
   let targetList = (TargetsInclude [buildFile] :: Targets)
       update = updateTargets targetList
                <> updateCodeGeneration True
                <> updateGhcOpts (["-ddump-hi", "-ddump-to-file", ("-dumpdir "++dumpDir)] ++ ["-Wall"] ++ extensionList)
 
+  refCon <- newIORef (Nothing :: Maybe WS.Connection)
+
   -- Actually update the session.
-  updateSession session update print
+  updateSession session update (streamOutput refCon)
+  
+  let ioMaybRef = readIORef refCon
+  maybeRef <- ioMaybRef
+  case maybeRef of
+    Nothing -> return ()
+    Just conn -> WS.sendClose conn ("Connection closed" :: BS.ByteString)
 
   -- Custom error showing.
   errorList' <- getSourceErrors session
@@ -74,13 +92,35 @@ compile buildFile config = do
                     [] -> []
                     _  -> prettyPrintErrors errorList'
 
-
   --  We still want to see errors and warnings on the terminal.
   mapM_ putStrLn $ prettyPrintErrors errorList'
 
   return $ case errorList of
              [] -> Right session  
              _  -> Left  errorList
+
+  where streamOutput :: IORef (Maybe WS.Connection) -> UpdateStatus -> IO ()
+        streamOutput refCon status = do
+          let refCon' = readIORef refCon
+          maybeCon <- refCon'
+          case maybeCon of
+            Nothing -> do
+              _ <- forkIO $ runS status refCon
+              threadDelay 100000
+              -- _ <- forkIO $ DW.runC
+              _ <- forkIO $ buildProgress
+              return ()
+            Just conn -> WS.sendTextData conn $ BS.pack $ show status
+          
+          where runS :: UpdateStatus -> IORef (Maybe WS.Connection) -> IO ()
+                runS status refCon = do
+                  sock' <- createSocket 4000
+                  (sock, _) <- accept sock'
+                  pending <- WS.makePendingConnection sock WS.defaultConnectionOptions
+                  conn <- WS.acceptRequest pending
+                  WS.sendTextData conn $ BS.pack $ show status
+                  writeIORef refCon (Just conn)
+
 
 -- | Remove the warnings from [SourceError] if any.
 -- Return an empty list if there are no errors and only warnings
@@ -121,3 +161,12 @@ extractExtensions = do
 
                   extensions = map parseExtension rawExt
               return extensions
+application _ respond = do 
+  respond $
+    responseLBS 
+      status200 
+      [("Content-Type", "text/html")]           
+      (Char8.fromStrict $ encodeUtf8 $ toStrict $ renderHtml $(shamletFile "build.hamlet"))
+
+buildProgress :: IO ()
+buildProgress = run 4001 application
